@@ -12,8 +12,9 @@ android/app                                              Compose UI, Kotlin BLE 
 ```
 
 Features: Markdown editor with live preview (English and Tamil), photo dithering (all algorithms including
-Sketch, presets, tone controls, rotation), "Share → Thermal Studio" for images and text, and BLE printing with
-progress, battery and status. Choose your printer once from a list of nearby devices; the app remembers it.
+Sketch, presets, tone controls, rotation), QR codes for links with an optional caption, "Share → Thermal Studio"
+for images, links and text, and BLE printing with progress, battery and status. Choose your printer once from a list
+of nearby devices; the app remembers it.
 
 ## Requirements
 
@@ -80,3 +81,5 @@ $ADB devices
 - **Text:** English and Tamil, using fonts embedded in the Rust library (Atkinson Hyperlegible, Fira Mono, Noto
   Sans Tamil). Output looks the same on the phone and the desktop.
 - **Markdown images** are resolved relative to the app's private `files/images` directory.
+- **Sharing a link** (for example from Chrome) opens it on the **QR code** tab, using the page title as the
+  caption. Shared text that's more than a single link goes to the Markdown editor as before.

@@ -30,30 +30,35 @@ import uniffi.thermal_ffi.ImageSettings
 import uniffi.thermal_ffi.ImageSource
 import uniffi.thermal_ffi.MarkdownRenderer
 import uniffi.thermal_ffi.MarkdownSettings
+import uniffi.thermal_ffi.QrSettings
 import uniffi.thermal_ffi.Raster
 import uniffi.thermal_ffi.algorithms
 import uniffi.thermal_ffi.defaultMarkdownSettings
+import uniffi.thermal_ffi.defaultQrSettings
 import uniffi.thermal_ffi.imagePreset
 
 /** Ask before printing anything longer than this. */
 const val LONG_PRINT_MM = 200f
 
 private val SAMPLE = """
-    # Thermal notes
+    # Welcome to Thermal Studio
 
-    Printed from **Android** on a *58 mm* roll.
+    Type your note here, then tap **Preview** to see exactly what will print.
 
-    - [x] Rust core via UniFFI
-    - [ ] Print something fun
+    - **Bold**, *italic* and ~~strikethrough~~
+    - Headings, lists, quotes and tables
 
-    வணக்கம்! தமிழிலும் அச்சிடலாம்.
+    Tamil works too: வணக்கம்! தமிழிலும் அச்சிடலாம்.
 
-    > Share a photo to this app, or open the Image tab.
+    > To print a photo or a link, share it to Thermal Studio, or use the **Image** and **QR code** tabs.
 """.trimIndent()
+
+/** A shared text that is nothing but a web link. */
+private val WEB_LINK = Regex("""https?://\S+""", RegexOption.IGNORE_CASE)
 
 class StudioViewModel(app: Application) : AndroidViewModel(app) {
 
-    enum class Tab { Markdown, Image }
+    enum class Tab { Markdown, Image, Qr }
 
     data class Rendered(val raster: Raster, val bitmap: ImageBitmap, val millis: Long) {
         val summary: String
@@ -83,7 +88,9 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
     var markdownPreview by mutableStateOf<Rendered?>(null)
         private set
 
-    private var renderer: MarkdownRenderer? = null
+    /** Shared by Markdown and QR rendering (fonts load once); `lazy` so both can start it safely. */
+    private val rendererLazy = lazy { MarkdownRenderer() }
+    private val renderer by rendererLazy
     private var markdownJob: Job? = null
 
     fun updateMarkdown(text: String) {
@@ -103,8 +110,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
             val (text, settings) = markdown to markdownSettings
             markdownPreview = runCatchingRender {
                 withContext(Dispatchers.Default) {
-                    val r = renderer ?: MarkdownRenderer().also { renderer = it }
-                    timed { r.render(text, settings, imagesDir()) }
+                    timed { renderer.render(text, settings, imagesDir()) }
                 }
             } ?: markdownPreview
         }
@@ -171,9 +177,66 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun shareText(text: String) {
-        tab = Tab.Markdown
-        updateMarkdown(text)
+    /**
+     * Shared text: a lone link becomes a QR code, captioned with [subject] (browsers send the page
+     * title); anything else is edited as Markdown.
+     */
+    fun shareText(text: String, subject: String? = null) {
+        val link = text.trim()
+        if (WEB_LINK.matches(link)) {
+            val caption = subject?.trim()?.takeUnless { it == link }.orEmpty()
+            openLink(link, caption)
+        } else {
+            tab = Tab.Markdown
+            updateMarkdown(text)
+        }
+    }
+
+    // --- QR code -----------------------------------------------------------------
+
+    var qrSettings by mutableStateOf(defaultQrSettings())
+        private set
+    var qrPreview by mutableStateOf<Rendered?>(null)
+        private set
+
+    /** Why the current link can't be drawn (e.g. too long to fit). */
+    var qrError by mutableStateOf<String?>(null)
+        private set
+
+    private var qrJob: Job? = null
+
+    fun updateQrSettings(settings: QrSettings) {
+        qrSettings = settings
+        renderQr(debounceMs = 60)
+    }
+
+    fun openLink(url: String, caption: String = "") {
+        tab = Tab.Qr
+        qrSettings = qrSettings.copy(url = url, caption = caption)
+        renderQr(debounceMs = 0)
+    }
+
+    private fun renderQr(debounceMs: Long) {
+        qrJob?.cancel()
+        val settings = qrSettings
+        if (settings.url.isBlank()) {
+            qrPreview = null
+            qrError = null
+            return
+        }
+        qrJob = viewModelScope.launch {
+            delay(debounceMs)
+            try {
+                qrPreview = withContext(Dispatchers.Default) { timed { renderer.renderQr(settings) } }
+                qrError = null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Never leave an outdated code on screen where Print would send it.
+                qrPreview = null
+                qrError = "Can't make a QR code: ${e.message}"
+            }
+        }
     }
 
     // --- printing ----------------------------------------------------------------
@@ -214,7 +277,11 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
     val busy: Boolean get() = printer != PrinterState.Idle
 
     val currentPreview: Rendered?
-        get() = if (tab == Tab.Markdown) markdownPreview else imagePreview
+        get() = when (tab) {
+            Tab.Markdown -> markdownPreview
+            Tab.Image -> imagePreview
+            Tab.Qr -> qrPreview
+        }
 
     /** Paper the current preview would use, including the feed after printing. */
     val currentLengthMm: Float? get() = currentPreview?.let { it.raster.lengthMm + feedMm }
@@ -360,7 +427,7 @@ class StudioViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         stopScan()
         ble.disconnect()
-        renderer?.close()
+        if (rendererLazy.isInitialized()) renderer.close()
         imageSource?.close()
     }
 }

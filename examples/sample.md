@@ -1,37 +1,19 @@
-# Thermal notes
+# Welcome to Thermal Studio
 
-Printed by **oss-thermal** on a *58 mm* roll. Supports `inline code`, ~~strikethrough~~ and [links](https://example.com).
+Write your note on the left. The preview shows exactly what will print, dot for dot.
 
-## Today
+## Formatting
 
-- [x] Reverse-engineer the BLE protocol
-- [ ] Write the Rust driver
-  - dithering
-  - markdown
-- Buy paper
+- **Bold**, *italic* and ~~strikethrough~~
+- Headings, lists, quotes and tables
+- Pictures: save the note next to a photo and write `![caption](photo.jpg)`
 
-வணக்கம்! தமிழிலும் அச்சிடலாம்.
+| Item      | Qty |    Price |
+|:----------|:---:|---------:|
+| Coffee    |  2  |     ₹240 |
+| Croissant |  1  |     ₹180 |
+| **Total** |     | **₹420** |
 
-1. Wake the printer
-2. Send `10 FF F1 03`
-3. Stream the raster
+Tamil works too: வணக்கம்! தமிழிலும் அச்சிடலாம்.
 
-> Isolated single dots smear on thermal paper, so prefer clustered patterns for shading.
-
-### Receipt
-
-| Item       | Qty |  Price |
-|:-----------|:---:|-------:|
-| Coffee     |  2  |  ₹240 |
-| Croissant  |  1  |  ₹180 |
-| **Total**  |     | **₹420** |
-
-```
-GS v 0  1D 76 30 00 30 00 hL hH
-```
-
----
-
-![test chart](test-chart.png)
-
-That's all, folks.
+> To print a photo, open the **Image** tab. For a link, use the **QR code** tab.

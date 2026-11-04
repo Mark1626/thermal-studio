@@ -1,8 +1,8 @@
 # thermal-studio
 
-Open-source tools for printing Markdown notes and photos on the **Seznik MiniX** pocket thermal printer (a rebadged
-LuckJingle S1 using 58 mm paper). It includes a desktop app, a command-line tool and an Android app, all built on the
-same Rust core.
+Open-source tools for printing Markdown notes, photos and QR codes on the **Seznik MiniX** pocket thermal printer (a
+rebadged LuckJingle S1 using 58 mm paper). It includes a desktop app, a command-line tool and an Android app, all built
+on the same Rust core.
 
 For how the printer's Bluetooth protocol was worked out, see [`RESEARCH.md`](RESEARCH.md).
 
@@ -15,9 +15,10 @@ You need a recent Rust toolchain (1.85 or newer).
 ```sh
 cargo run --release -p thermal-studio              # opens with a sample note
 cargo run --release -p thermal-studio -- photo.jpg # or open an image (drag and drop also works)
+cargo run --release -p thermal-studio -- https://example.com # or make a QR code for a link
 ```
 
-Write Markdown or load a photo, adjust it with a live preview, then press **Print**.
+Write Markdown, load a photo or type a link for a QR code, adjust it with a live preview, then press **Print**.
 
 ### Command line
 
@@ -63,8 +64,8 @@ On macOS, run the tools from a terminal that has Bluetooth access.
 | [`apps/thermal-studio`](apps/thermal-studio) | Desktop app ([egui](https://github.com/emilk/egui)) |
 | [`crates/thermal-cli`](crates/thermal-cli) | The `thermal` command-line tool |
 | [`android/`](android) | Android app (Jetpack Compose) |
-| [`crates/thermal-raster`](crates/thermal-raster) | Image preparation and dithering |
-| [`crates/thermal-markdown`](crates/thermal-markdown) | Markdown rendering, with bundled English and Tamil fonts |
+| [`crates/thermal-raster`](crates/thermal-raster) | Image preparation, dithering and QR codes |
+| [`crates/thermal-markdown`](crates/thermal-markdown) | Markdown and QR-label rendering, with bundled English and Tamil fonts |
 | [`crates/thermal-proto`](crates/thermal-proto) | Printer protocol and print flow (no I/O) |
 | [`crates/thermal-ble`](crates/thermal-ble) | Bluetooth LE connection ([btleplug](https://github.com/deviceplug/btleplug)) |
 | [`crates/thermal-ffi`](crates/thermal-ffi) | Kotlin/Swift bindings ([UniFFI](https://mozilla.github.io/uniffi-rs/)) used by the Android app |
@@ -86,6 +87,13 @@ Thermal paper smears single isolated dots into grey, so the defaults favour clea
 - **Sketch:** redraws a photo as outlines and cross-hatching, like a pen drawing.
 
 There are 15 algorithms in total. `examples/test-chart.png` is a tone chart for comparing them.
+
+### QR codes
+
+QR codes aren't dithered. They're drawn dot for dot, so every module is a whole number of printer dots (never fewer
+than 3, about 0.4 mm) with the standard white border around it. A link you type like `example.com` is encoded as
+`https://example.com` so phone cameras open it, while the text printed under the code stays as you typed it. Error
+correction is raised automatically whenever that doesn't make the code bigger.
 
 ## Development
 

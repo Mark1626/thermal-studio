@@ -10,11 +10,11 @@ mod printer;
 use eframe::egui::{self, Color32, ColorImage, RichText, TextureHandle, TextureOptions};
 use printer::{Command, Event, PrinterWorker};
 use thermal_ble::PrinterInfo;
-use thermal_markdown::{FsImages, Renderer, Style};
+use thermal_markdown::{FsImages, QrLabel, Renderer, Style};
 use thermal_proto::{Density, PrintJob};
 use thermal_raster::{
-    Algorithm, Bitmap, DynamicImage, Geometry, GrayF32, ImageOptions, Kind, ResizeFilter, Rotation,
-    paper,
+    Algorithm, Bitmap, DynamicImage, Geometry, GrayF32, ImageOptions, Kind, QrEcc, ResizeFilter,
+    Rotation, paper,
 };
 
 const PAPER: Color32 = Color32::from_rgb(250, 250, 246);
@@ -26,7 +26,8 @@ const SAMPLE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples");
 /// Ask before printing anything longer than this (paper is precious).
 const LONG_PRINT_MM: f32 = 200.0;
 
-/// Usage: `thermal-studio [FILE]` opens an image or Markdown file.
+/// Usage: `thermal-studio [FILE | URL]` opens an image or Markdown file, or makes a QR
+/// code for an `http(s)://` link.
 /// `--screenshot OUT.png` (development aid) saves one rendered frame and quits.
 fn main() -> eframe::Result {
     let mut args = std::env::args_os().skip(1);
@@ -70,6 +71,7 @@ fn main() -> eframe::Result {
 enum Tab {
     Image,
     Markdown,
+    Qr,
 }
 
 /// A rendered bitmap plus its on-screen texture.
@@ -113,6 +115,11 @@ impl Preview {
             name,
             ColorImage::new([gray.width as usize, gray.height as usize], pixels),
         );
+    }
+
+    fn clear(&mut self) {
+        self.bitmap = None;
+        self.texture = None;
     }
 
     fn upload(&mut self, ctx: &egui::Context, name: &str, img: ColorImage) {
@@ -213,6 +220,15 @@ impl Default for MarkdownTab {
     }
 }
 
+#[derive(Default)]
+struct QrTab {
+    label: QrLabel,
+    dirty: bool,
+    /// Why the current link can't be drawn (e.g. too long).
+    error: Option<String>,
+    preview: Preview,
+}
+
 /// The printer is only connected while a job or status check runs.
 #[derive(Default)]
 enum PrinterState {
@@ -300,6 +316,7 @@ struct Studio {
     zoom: f32,
     image: ImageTab,
     markdown: MarkdownTab,
+    qr: QrTab,
     printer: PrinterPanel,
     message: Option<String>,
     notice: Option<String>,
@@ -314,6 +331,7 @@ impl Default for Studio {
             zoom: 1.5,
             image: ImageTab::default(),
             markdown: MarkdownTab::default(),
+            qr: QrTab::default(),
             printer: PrinterPanel::default(),
             message: None,
             notice: None,
@@ -335,16 +353,13 @@ impl eframe::App for Studio {
         self.handle_dropped_files(&ctx);
         self.update_image(&ctx);
         self.update_markdown(&ctx);
+        self.update_qr(&ctx);
 
         self.picker_window(&ctx);
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
-                let preview = match self.tab {
-                    Tab::Image => &self.image.preview,
-                    Tab::Markdown => &self.markdown.preview,
-                };
-                ui.label(preview.status());
+                ui.label(self.current_preview().status());
                 if let Some(n) = &self.notice {
                     ui.separator();
                     ui.label(RichText::new(n).color(ui.visuals().hyperlink_color));
@@ -384,6 +399,22 @@ impl eframe::App for Studio {
                         .show(ui, self.zoom, "Type some Markdown")
                 });
             }
+            Tab::Qr => {
+                egui::Panel::left("qr-controls")
+                    .resizable(true)
+                    .default_size(310.0)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| self.qr_controls(ui));
+                    });
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let hint = self
+                        .qr
+                        .error
+                        .as_deref()
+                        .unwrap_or("Type or paste a link to make a QR code");
+                    self.qr.preview.show(ui, self.zoom, hint)
+                });
+            }
         }
     }
 }
@@ -399,23 +430,22 @@ impl Studio {
                 RichText::new("Markdown").size(15.0),
             );
             ui.selectable_value(&mut self.tab, Tab::Image, RichText::new("Image").size(15.0));
+            ui.selectable_value(&mut self.tab, Tab::Qr, RichText::new("QR code").size(15.0));
             ui.separator();
             ui.label("Zoom");
             for z in [1.0, 1.5, 2.0, 3.0] {
                 ui.selectable_value(&mut self.zoom, z, format!("{z}×"));
             }
             ui.separator();
-            let current = match self.tab {
-                Tab::Image => self.image.preview.bitmap.as_ref(),
-                Tab::Markdown => self.markdown.preview.bitmap.as_ref(),
-            };
+            let current = self.current_preview().bitmap.as_ref();
             let enabled = current.is_some();
+            let mut exported = None;
             if ui
                 .add_enabled(enabled, egui::Button::new("Export PNG…"))
                 .clicked()
                 && let Some(bmp) = current
             {
-                self.message = export_png(bmp).err();
+                exported = Some(export_png(bmp));
             }
             if ui
                 .add_enabled(enabled, egui::Button::new("Export raw…"))
@@ -423,18 +453,26 @@ impl Studio {
                 .clicked()
                 && let Some(bmp) = current
             {
-                self.message = export_raw(bmp).err();
+                exported = Some(export_raw(bmp));
+            }
+            if let Some(result) = exported {
+                self.message = result.err();
             }
             ui.separator();
             self.print_controls(ui);
         });
     }
 
-    fn current_bitmap(&self) -> Option<&Bitmap> {
+    fn current_preview(&self) -> &Preview {
         match self.tab {
-            Tab::Image => self.image.preview.bitmap.as_ref(),
-            Tab::Markdown => self.markdown.preview.bitmap.as_ref(),
+            Tab::Image => &self.image.preview,
+            Tab::Markdown => &self.markdown.preview,
+            Tab::Qr => &self.qr.preview,
         }
+    }
+
+    fn current_bitmap(&self) -> Option<&Bitmap> {
+        self.current_preview().bitmap.as_ref()
     }
 
     // --- printing -----------------------------------------------------------
@@ -686,7 +724,9 @@ impl Studio {
     }
 
     fn open_any(&mut self, path: PathBuf) {
-        if has_ext(&path, &MARKDOWN_EXTS) {
+        if let Some(url) = path.to_str().filter(|s| is_web_link(s)) {
+            self.open_link(url.to_string());
+        } else if has_ext(&path, &MARKDOWN_EXTS) {
             self.open_markdown(path);
             self.tab = Tab::Markdown;
         } else {
@@ -1051,6 +1091,112 @@ impl Studio {
             }
         });
     }
+
+    // --- QR code ------------------------------------------------------------
+
+    fn open_link(&mut self, url: String) {
+        self.qr.label.url = url;
+        self.qr.dirty = true;
+        self.tab = Tab::Qr;
+    }
+
+    fn update_qr(&mut self, ctx: &egui::Context) {
+        let tab = &mut self.qr;
+        if !tab.dirty {
+            return;
+        }
+        tab.dirty = false;
+        tab.error = None;
+        if tab.label.url.trim().is_empty() {
+            tab.preview.clear();
+            return;
+        }
+        let start = Instant::now();
+        // Shares the Markdown tab's renderer, so the fonts are only loaded once.
+        match self.markdown.renderer.render_qr(&tab.label) {
+            Ok(bmp) => {
+                let ms = start.elapsed().as_secs_f32() * 1000.0;
+                tab.preview.set_bitmap(ctx, "qr-preview", bmp, ms);
+            }
+            Err(e) => {
+                tab.error = Some(format!("Can't make a QR code: {e}"));
+                tab.preview.clear();
+            }
+        }
+    }
+
+    fn qr_controls(&mut self, ui: &mut egui::Ui) {
+        let tab = &mut self.qr;
+        let before = tab.label.clone();
+        let label = &mut tab.label;
+
+        ui.add_space(4.0);
+        ui.label("Link");
+        ui.add(
+            egui::TextEdit::singleline(&mut label.url)
+                .hint_text("https://example.com")
+                .desired_width(f32::INFINITY),
+        );
+        let target = thermal_raster::normalize_url(&label.url);
+        if target != label.url.trim() {
+            ui.label(RichText::new(format!("Opens {target}")).small().weak());
+        }
+
+        ui.add_space(6.0);
+        ui.label("Caption");
+        ui.add(
+            egui::TextEdit::singleline(&mut label.caption)
+                .hint_text("Optional, printed under the code")
+                .desired_width(f32::INFINITY),
+        );
+        ui.checkbox(&mut label.show_url, "Print the link under the code");
+
+        egui::CollapsingHeader::new("Code")
+            .default_open(true)
+            .show(ui, |ui| {
+                let code = &mut label.code;
+                let mut mm = code.max_width as f32 / paper::DOTS_PER_MM;
+                if ui
+                    .add(
+                        egui::Slider::new(&mut mm, 16.0..=48.0)
+                            .step_by(1.0)
+                            .suffix(" mm")
+                            .text("largest size"),
+                    )
+                    .on_hover_text(format!(
+                        "Including the white border scanners need. Modules are whole dots, \
+                         never smaller than {} dots, so long links can come out bigger.",
+                        thermal_raster::QR_MIN_MODULE_DOTS
+                    ))
+                    .changed()
+                {
+                    code.max_width = (mm * paper::DOTS_PER_MM).round() as u32;
+                }
+                egui::ComboBox::from_label("Error correction")
+                    .selected_text(code.ecc.name())
+                    .show_ui(ui, |ui| {
+                        for ecc in QrEcc::ALL {
+                            ui.selectable_value(&mut code.ecc, ecc, ecc.name());
+                        }
+                    });
+                ui.label(
+                    RichText::new(
+                        "Higher levels survive smudges and creases but make a denser code.",
+                    )
+                    .small()
+                    .weak(),
+                );
+            });
+
+        if tab.label != before {
+            tab.dirty = true;
+        }
+    }
+}
+
+fn is_web_link(s: &str) -> bool {
+    let lower = s.trim_start().to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
 }
 
 fn has_ext(path: &Path, exts: &[&str]) -> bool {

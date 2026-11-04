@@ -1,4 +1,4 @@
-//! Raster pipeline for 1-bit thermal printers.
+//! Raster pipeline for 1-bit thermal printers, plus QR codes ([`qr_code`]).
 //!
 //! ```no_run
 //! use thermal_raster::{ImageOptions, load_image, render_image};
@@ -13,6 +13,7 @@
 mod bitmap;
 mod dither;
 mod prepare;
+mod qr;
 mod sketch;
 
 pub use bitmap::{Bitmap, HAlign};
@@ -20,6 +21,7 @@ pub use dither::{Algorithm, DitherOptions, Kind, dither};
 pub use prepare::{
     Adjustments, Geometry, GrayF32, ResizeFilter, Rotation, adjust, otsu_threshold, to_gray,
 };
+pub use qr::{QR_MIN_MODULE_DOTS, QrEcc, QrError, QrOptions, normalize_url, qr_code};
 
 pub use image::DynamicImage;
 

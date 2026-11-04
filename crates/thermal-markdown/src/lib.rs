@@ -14,9 +14,13 @@
 //!
 //! Text can be English and Tamil, freely mixed. All fonts are embedded, so output is
 //! identical on every platform.
+//!
+//! [`Renderer::render_qr`] uses the same fonts to print a QR code with a caption and
+//! its link underneath (see [`QrLabel`]).
 
 mod layout;
 mod parse;
+mod qr;
 
 use std::path::PathBuf;
 
@@ -25,6 +29,7 @@ use thermal_raster::{Bitmap, DynamicImage, HAlign, ImageOptions};
 use unicode_script::Script;
 
 pub use parse::{Block, Item, Span, parse};
+pub use qr::QrLabel;
 
 /// Family name of the embedded body font.
 pub const SANS_FAMILY: &str = "Atkinson Hyperlegible";

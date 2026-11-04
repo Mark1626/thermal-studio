@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -69,9 +70,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import java.util.Locale
+import kotlin.math.roundToInt
 import org.ossthermal.studio.LONG_PRINT_MM
 import org.ossthermal.studio.StudioViewModel
 import org.ossthermal.studio.StudioViewModel.PrinterState
@@ -82,6 +87,8 @@ import uniffi.thermal_ffi.AlgorithmKind
 import uniffi.thermal_ffi.Density
 import uniffi.thermal_ffi.ImagePreset
 import uniffi.thermal_ffi.ImageRotation
+import uniffi.thermal_ffi.QrEcc
+import uniffi.thermal_ffi.normalizeUrl
 
 private val BLE_PERMISSIONS = arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
 
@@ -188,10 +195,12 @@ fun StudioApp(vm: StudioViewModel) {
             PrimaryTabRow(selectedTabIndex = vm.tab.ordinal) {
                 Tab(selected = vm.tab == Tab.Markdown, onClick = { vm.tab = Tab.Markdown }, text = { Text("Markdown") })
                 Tab(selected = vm.tab == Tab.Image, onClick = { vm.tab = Tab.Image }, text = { Text("Image") })
+                Tab(selected = vm.tab == Tab.Qr, onClick = { vm.tab = Tab.Qr }, text = { Text("QR code") })
             }
             when (vm.tab) {
                 Tab.Markdown -> MarkdownScreen(vm)
                 Tab.Image -> ImageScreen(vm)
+                Tab.Qr -> QrScreen(vm)
             }
         }
     }
@@ -473,6 +482,81 @@ private fun ImageControls(vm: StudioViewModel) {
             FilterChip(selected = s.rotation == r, onClick = { update(s.copy(rotation = r)) }, label = { Text(label) })
         }
     }
+    Spacer(Modifier.height(24.dp))
+}
+
+// --- QR code ----------------------------------------------------------------------
+
+@Composable
+private fun QrScreen(vm: StudioViewModel) {
+    val placeholder = when {
+        vm.qrSettings.url.isBlank() -> "Type a link, or share one to Thermal Studio from your browser."
+        else -> vm.qrError ?: "Rendering…"
+    }
+    Column(Modifier.fillMaxSize().imePadding()) {
+        PaperPreview(vm.qrPreview, placeholder, Modifier.weight(1f))
+        HorizontalDivider()
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
+            QrControls(vm)
+        }
+    }
+}
+
+@Composable
+private fun QrControls(vm: StudioViewModel) {
+    val s = vm.qrSettings
+    val update = vm::updateQrSettings
+    val target = remember(s.url) { normalizeUrl(s.url) }
+
+    OutlinedTextField(
+        value = s.url,
+        onValueChange = { update(s.copy(url = it)) },
+        label = { Text("Link") },
+        placeholder = { Text("https://example.com") },
+        singleLine = true,
+        isError = vm.qrError != null,
+        supportingText = if (target.isNotEmpty() && target != s.url.trim()) {
+            { Text("Opens $target", maxLines = 2) }
+        } else {
+            null
+        },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = s.caption,
+        onValueChange = { update(s.copy(caption = it)) },
+        label = { Text("Caption (optional)") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+    )
+    LabeledSwitch("Print the link under the code", s.showUrl) { update(s.copy(showUrl = it)) }
+
+    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+    LabeledSlider(
+        "Largest size (mm)",
+        s.maxWidth / 8f,
+        16f..48f,
+        { update(s.copy(maxWidth = (it * 8).roundToInt())) },
+        format = "%.0f",
+    )
+    Text("Error correction", style = MaterialTheme.typography.bodyMedium)
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        val options = listOf(QrEcc.LOW to "7%", QrEcc.MEDIUM to "15%", QrEcc.QUARTILE to "25%", QrEcc.HIGH to "30%")
+        options.forEachIndexed { i, (ecc, label) ->
+            SegmentedButton(
+                selected = s.ecc == ecc,
+                onClick = { update(s.copy(ecc = ecc)) },
+                shape = SegmentedButtonDefaults.itemShape(i, options.size),
+            ) { Text(label, maxLines = 1) }
+        }
+    }
+    Text(
+        "How much of the code can be smudged or creased and still scan. Higher makes a denser code.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.outline,
+    )
     Spacer(Modifier.height(24.dp))
 }
 

@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
         handleShare(intent)
     }
 
-    /** "Share → Thermal Studio": images open in the Image tab, text in the editor. */
+    /** "Share → Thermal Studio": images open in the Image tab, links as a QR code, other text in the editor. */
     private fun handleShare(intent: Intent?) {
         if (intent?.action != Intent.ACTION_SEND) return
         val type = intent.type ?: return
@@ -41,7 +41,9 @@ class MainActivity : ComponentActivity() {
             type.startsWith("image/") ->
                 intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)?.let(vm::openImage)
             type == "text/plain" ->
-                intent.getStringExtra(Intent.EXTRA_TEXT)?.let(vm::shareText)
+                intent.getStringExtra(Intent.EXTRA_TEXT)?.let {
+                    vm.shareText(it, subject = intent.getStringExtra(Intent.EXTRA_SUBJECT))
+                }
         }
     }
 }

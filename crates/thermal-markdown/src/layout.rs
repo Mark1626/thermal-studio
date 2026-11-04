@@ -267,6 +267,23 @@ impl Layout<'_> {
         );
     }
 
+    /// Plain text centred between the margins, wrapped as needed; returns the height used.
+    pub fn centered_text(&mut self, text: &str, y: i32, size: f32, bold: bool) -> i32 {
+        let s = self.style;
+        let span = Span {
+            text: text.into(),
+            ..Default::default()
+        };
+        let ts = TextStyle {
+            size,
+            bold,
+            mono: false,
+            align: Align::Center,
+        };
+        let width = s.width.saturating_sub(2 * s.margin).max(16);
+        self.text(&[span], s.margin as i32, y, width, ts)
+    }
+
     /// Lay out and draw text; returns the height used.
     fn text(&mut self, spans: &[Span], x: i32, y: i32, width: u32, ts: TextStyle) -> i32 {
         let mut buffer = self.shape(spans, Some(width), ts);

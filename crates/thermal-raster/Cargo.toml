@@ -1,6 +1,6 @@
 [package]
 name = "thermal-raster"
-description = "1-bit bitmaps, image preparation and dithering for thermal printers"
+description = "1-bit bitmaps, image preparation, dithering and QR codes for thermal printers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +9,7 @@ license.workspace = true
 [dependencies]
 image.workspace = true
 thiserror.workspace = true
+qrcodegen.workspace = true
+
+[dev-dependencies]
+rqrr.workspace = true

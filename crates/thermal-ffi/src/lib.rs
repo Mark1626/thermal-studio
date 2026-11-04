@@ -404,6 +404,86 @@ impl MarkdownRenderer {
             .unwrap_or_else(|e| e.into_inner())
             .clear_image_cache();
     }
+
+    /// Render a QR code with its caption and link to a 384-dot-wide raster, using
+    /// this renderer's fonts.
+    pub fn render_qr(&self, settings: QrSettings) -> Result<Raster, ThermalError> {
+        let label = to_qr_label(settings);
+        let mut r = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let bmp = r
+            .render_qr(&label)
+            .map_err(|e| ThermalError::InvalidArgument(e.to_string()))?;
+        Ok(Raster::from(&bmp))
+    }
+}
+
+// --- QR codes -----------------------------------------------------------------
+
+/// How much of a code can be smudged or torn and still scan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum QrEcc {
+    /// About 7%.
+    Low,
+    /// About 15%.
+    Medium,
+    /// About 25%.
+    Quartile,
+    /// About 30%.
+    High,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct QrSettings {
+    /// The link (or any text) as typed; the code holds [`normalize_url`] of it.
+    pub url: String,
+    /// Printed in bold under the code; empty for none.
+    pub caption: String,
+    /// Also print the link under the code.
+    pub show_url: bool,
+    /// Minimum error correction (raised automatically when that costs no space).
+    pub ecc: QrEcc,
+    /// Widest the code may be, quiet zone included, in dots (up to 384).
+    pub max_width: i32,
+}
+
+#[uniffi::export]
+pub fn default_qr_settings() -> QrSettings {
+    let l = thermal_markdown::QrLabel::default();
+    QrSettings {
+        url: l.url,
+        caption: l.caption,
+        show_url: l.show_url,
+        ecc: match l.code.ecc {
+            thermal_raster::QrEcc::Low => QrEcc::Low,
+            thermal_raster::QrEcc::Medium => QrEcc::Medium,
+            thermal_raster::QrEcc::Quartile => QrEcc::Quartile,
+            thermal_raster::QrEcc::High => QrEcc::High,
+        },
+        max_width: l.code.max_width as i32,
+    }
+}
+
+/// What the QR code for a typed link will hold, e.g. `example.com` → `https://example.com`.
+#[uniffi::export]
+pub fn normalize_url(input: String) -> String {
+    thermal_raster::normalize_url(&input)
+}
+
+fn to_qr_label(s: QrSettings) -> thermal_markdown::QrLabel {
+    thermal_markdown::QrLabel {
+        url: s.url,
+        caption: s.caption,
+        show_url: s.show_url,
+        code: thermal_raster::QrOptions {
+            ecc: match s.ecc {
+                QrEcc::Low => thermal_raster::QrEcc::Low,
+                QrEcc::Medium => thermal_raster::QrEcc::Medium,
+                QrEcc::Quartile => thermal_raster::QrEcc::Quartile,
+                QrEcc::High => thermal_raster::QrEcc::High,
+            },
+            max_width: s.max_width.clamp(0, paper::WIDTH_DOTS as i32) as u32,
+        },
+    }
 }
 
 // --- printer protocol ---------------------------------------------------------
@@ -691,5 +771,37 @@ mod tests {
         assert!(matches!(s.poll(0), SessionAction::DrainReplies));
         assert!(matches!(s.poll(0), SessionAction::Write { .. }));
         assert_eq!(gatt_info().write, "0000ff02-0000-1000-8000-00805f9b34fb");
+    }
+
+    #[test]
+    fn qr_settings_render_and_report_errors() {
+        let r = MarkdownRenderer::new();
+        let settings = QrSettings {
+            url: "example.com".into(),
+            caption: "Menu".into(),
+            ..default_qr_settings()
+        };
+        let raster = r.render_qr(settings.clone()).unwrap();
+        assert_eq!((raster.width, raster.stride), (384, 48));
+        assert!(raster.height > 0 && raster.ink_ratio > 0.0);
+        // Out-of-range sizes are clamped rather than rejected.
+        for max_width in [-5, 10_000] {
+            assert!(
+                r.render_qr(QrSettings {
+                    max_width,
+                    ..settings.clone()
+                })
+                .is_ok()
+            );
+        }
+        let too_long = QrSettings {
+            url: "x".repeat(1500),
+            ..settings
+        };
+        assert!(matches!(
+            r.render_qr(too_long),
+            Err(ThermalError::InvalidArgument(_))
+        ));
+        assert_eq!(normalize_url(" example.com ".into()), "https://example.com");
     }
 }

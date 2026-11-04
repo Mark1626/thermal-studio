@@ -1,0 +1,26 @@
+[package]
+name = "thermal-ffi"
+description = "UniFFI bindings (Kotlin/Swift) for the thermal-* libraries"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "thermal_ffi"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+thermal-raster.workspace = true
+thermal-markdown.workspace = true
+thermal-proto.workspace = true
+uniffi.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "thermal-studio"
+description = "Desktop studio for preparing thermal prints (immediate-mode egui front end)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thermal-raster.workspace = true
+thermal-markdown.workspace = true
+eframe = { workspace = true, features = ["persistence"] }
+egui.workspace = true
+rfd.workspace = true
+image.workspace = true
+thermal-proto.workspace = true
+thermal-ble.workspace = true
+tokio.workspace = true

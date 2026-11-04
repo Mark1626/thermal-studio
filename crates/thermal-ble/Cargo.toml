@@ -1,0 +1,19 @@
+[package]
+name = "thermal-ble"
+description = "Bluetooth LE transport for LuckPrinter-family thermal printers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thermal-proto.workspace = true
+thermal-raster.workspace = true
+btleplug.workspace = true
+tokio.workspace = true
+futures.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

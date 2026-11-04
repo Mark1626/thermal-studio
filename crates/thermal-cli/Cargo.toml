@@ -1,0 +1,20 @@
+[package]
+name = "thermal-cli"
+description = "Command-line front end: dither images and render Markdown for thermal printers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "thermal"
+path = "src/main.rs"
+
+[dependencies]
+thermal-raster.workspace = true
+thermal-markdown.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+thermal-proto.workspace = true
+thermal-ble.workspace = true
+tokio.workspace = true

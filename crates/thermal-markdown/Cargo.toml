@@ -1,0 +1,16 @@
+[package]
+name = "thermal-markdown"
+description = "Render Markdown to 1-bit bitmaps for thermal printers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thermal-raster.workspace = true
+image.workspace = true
+pulldown-cmark.workspace = true
+cosmic-text.workspace = true
+fontdb.workspace = true
+unicode-script.workspace = true
+thiserror.workspace = true

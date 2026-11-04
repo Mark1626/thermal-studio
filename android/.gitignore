@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+# Generated from the Rust crates by the app's Gradle tasks
+app/src/main/jniLibs/
+app/src/main/java/uniffi/

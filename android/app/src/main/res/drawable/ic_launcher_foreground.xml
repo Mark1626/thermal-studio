@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A receipt coming out of a printer slot. Drawn inside the 66dp adaptive-icon safe zone. -->
+<!-- A receipt coming out of a printer slot. Drawn inside the 66dp adaptive-icon safe zone.
+     The desktop app's icon (apps/thermal-studio/assets/icon.svg) copies these paths; change both. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"

@@ -1,0 +1,22 @@
+<!--
+  Desktop app icon: the Android launcher icon (a receipt coming out of a printer) on a
+  rounded square with a transparent margin, as desktop icons are drawn.
+  The paths are copied from android/app/src/main/res/drawable/ic_launcher_foreground.xml
+  and the yellow from res/values/colors.xml; change them together.
+  Regenerate the PNG the app embeds with:
+    rsvg-convert -w 512 -h 512 icon.svg -o icon.png
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#F2C94C" />
+  <!-- The 72-unit area an Android launcher shows of the 108-unit adaptive icon. -->
+  <svg x="100" y="100" width="824" height="824" viewBox="18 18 72 72">
+    <!-- printer body -->
+    <path fill="#2B2B33" d="M30,44h48a6,6 0,0 1,6 6v14a6,6 0,0 1,-6 6H30a6,6 0,0 1,-6 -6V50a6,6 0,0 1,6 -6z" />
+    <!-- slot -->
+    <path fill="#111114" d="M36,52h36v4H36z" />
+    <!-- paper -->
+    <path fill="#FAFAF6" d="M39,54h30v26l-5,-3 -5,3 -5,-3 -5,3 -5,-3 -5,3z" />
+    <!-- printed lines -->
+    <path fill="#2B2B33" d="M43,60h22v2.5H43zM43,65h16v2.5H43zM43,70h19v2.5H43z" />
+  </svg>
+</svg>

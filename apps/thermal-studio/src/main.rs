@@ -25,6 +25,8 @@ const SAMPLE_MD: &str = include_str!("../../../examples/sample.md");
 const SAMPLE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples");
 /// Ask before printing anything longer than this (paper is precious).
 const LONG_PRINT_MM: f32 = 200.0;
+/// Window, taskbar and Dock icon: the Android launcher icon (see `assets/icon.svg`).
+const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
 /// Usage: `thermal-studio [FILE | URL]` opens an image or Markdown file, or makes a QR
 /// code for an `http(s)://` link.
@@ -44,7 +46,10 @@ fn main() -> eframe::Result {
             .with_title("Thermal Studio")
             .with_inner_size([1280.0, 860.0])
             .with_min_inner_size([820.0, 520.0])
-            .with_drag_and_drop(true),
+            .with_drag_and_drop(true)
+            .with_icon(
+                eframe::icon_data::from_png_bytes(ICON_PNG).expect("embedded icon is a PNG"),
+            ),
         ..Default::default()
     };
     eframe::run_native(
@@ -1227,4 +1232,13 @@ fn export_raw(bmp: &Bitmap) -> Result<(), String> {
         return Ok(());
     };
     std::fs::write(&path, bmp.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn embedded_icon_decodes() {
+        let icon = eframe::icon_data::from_png_bytes(super::ICON_PNG).unwrap();
+        assert_eq!((icon.width, icon.height), (512, 512));
+    }
 }

@@ -19,6 +19,13 @@ cargo run --release -p thermal-studio -- https://example.com # or make a QR code
 ```
 
 Write Markdown, load a photo or type a link for a QR code, adjust it with a live preview, then press **Print**.
+In Markdown, a fenced code block marked `qr` prints as a QR code.
+
+The **Templates** tab has ready-made notes with a few blanks to fill in: a Wi-Fi card with a QR code that guests
+can scan, a checklist, a jar label with the date it was made and a use-by date, and a contact card whose QR code
+saves your details. **Add…** lists more from the official collection in [`templates/`](templates), or adds one from an
+`https://` link or a file. Added templates are saved, so
+they work offline. To write your own, see [`crates/thermal-templates`](crates/thermal-templates/README.md).
 
 ### Command line
 
@@ -30,6 +37,10 @@ cargo run --release -p thermal-cli -- image photo.jpg -o preview.png
 # Print over Bluetooth
 cargo run --release -p thermal-cli -- markdown note.md --print
 cargo run --release -p thermal-cli -- image photo.jpg --print
+
+# Fill in a template: a ready-made note with a few blanks (list them with `templates`)
+cargo run --release -p thermal-cli -- template wifi-card --set ssid=Home --set password=secret -o wifi.png
+cargo run --release -p thermal-cli -- template checklist --set items=Milk --set items=Eggs --print
 
 # List nearby printers and the available dithering algorithms
 cargo run --release -p thermal-cli -- printers
@@ -66,6 +77,8 @@ On macOS, run the tools from a terminal that has Bluetooth access.
 | [`android/`](android) | Android app (Jetpack Compose) |
 | [`crates/thermal-raster`](crates/thermal-raster) | Image preparation, dithering and QR codes |
 | [`crates/thermal-markdown`](crates/thermal-markdown) | Markdown and QR-label rendering, with bundled English and Tamil fonts |
+| [`crates/thermal-templates`](crates/thermal-templates) | Fill-in-the-blanks templates that produce Markdown (format described in its README) |
+| [`templates/`](templates) | The official collection of templates the apps offer to add, and its `index.json` |
 | [`crates/thermal-proto`](crates/thermal-proto) | Printer protocol and print flow (no I/O) |
 | [`crates/thermal-ble`](crates/thermal-ble) | Bluetooth LE connection ([btleplug](https://github.com/deviceplug/btleplug)) |
 | [`crates/thermal-ffi`](crates/thermal-ffi) | Kotlin/Swift bindings ([UniFFI](https://mozilla.github.io/uniffi-rs/)) used by the Android app |

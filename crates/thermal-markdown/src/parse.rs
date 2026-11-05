@@ -1,6 +1,6 @@
 //! pulldown-cmark events → a small block tree tailored for print layout.
 
-use pulldown_cmark::{Alignment, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use std::iter::Peekable;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -52,6 +52,8 @@ pub enum Block {
         url: String,
         alt: String,
     },
+    /// A fenced code block whose info string is `qr`: its text, printed as a QR code.
+    Qr(String),
 }
 
 pub fn parse(markdown: &str) -> Vec<Block> {
@@ -131,7 +133,7 @@ impl<'a, I: Iterator<Item = Event<'a>>> BlockParser<'a, I> {
                         out.push(Block::Heading(level as u8, spans));
                     }
                     Tag::BlockQuote(_) => out.push(Block::Quote(self.blocks())),
-                    Tag::CodeBlock(_) => {
+                    Tag::CodeBlock(kind) => {
                         let mut text = String::new();
                         for ev in self.events.by_ref() {
                             match ev {
@@ -140,7 +142,11 @@ impl<'a, I: Iterator<Item = Event<'a>>> BlockParser<'a, I> {
                                 _ => {}
                             }
                         }
-                        out.push(Block::Code(text.trim_end_matches('\n').to_string()));
+                        let text = text.trim_end_matches('\n').to_string();
+                        out.push(match kind {
+                            CodeBlockKind::Fenced(info) if is_qr(&info) => Block::Qr(text),
+                            _ => Block::Code(text),
+                        });
                     }
                     Tag::List(start) => {
                         let mut items = Vec::new();
@@ -328,6 +334,13 @@ fn flush(out: &mut Vec<Block>, spans: &mut Vec<Span>, make: fn(Vec<Span>) -> Blo
     spans.clear();
 }
 
+/// ```` ```qr ```` (the first word of the info string; anything after it is ignored).
+fn is_qr(info: &str) -> bool {
+    info.split_whitespace()
+        .next()
+        .is_some_and(|w| w.eq_ignore_ascii_case("qr"))
+}
+
 fn spans_only(inl: Vec<Inline>) -> Vec<Span> {
     inl.into_iter()
         .map(|i| match i {
@@ -398,5 +411,15 @@ mod tests {
         assert!(matches!(&b[0], Block::Quote(inner) if matches!(inner[0], Block::Paragraph(_))));
         assert_eq!(b[1], Block::Code("fn x() {}".into()));
         assert_eq!(b[2], Block::Rule);
+    }
+
+    #[test]
+    fn qr_fences() {
+        let b = parse(
+            "```qr\nhttps://example.com\n```\n\n```QR big\nWIFI:S:x;;\n```\n\n```rust\nqr\n```\n",
+        );
+        assert_eq!(b[0], Block::Qr("https://example.com".into()));
+        assert_eq!(b[1], Block::Qr("WIFI:S:x;;".into()));
+        assert_eq!(b[2], Block::Code("qr".into()));
     }
 }

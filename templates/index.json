@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "templates": [
+    {
+      "id": "action-item-tracker",
+      "name": "Action item tracker",
+      "description": "What was agreed, who's doing it and by when, with a box to tick off each one.",
+      "version": "1.0.0",
+      "author": "Thermal Studio",
+      "file": "action-item-tracker.md",
+      "schema": 1
+    },
+    {
+      "id": "calendar-tracker",
+      "name": "Calendar tracker",
+      "description": "A month of days to tick off, for a habit, a medicine or practice.",
+      "version": "1.0.0",
+      "author": "Thermal Studio",
+      "file": "calendar-tracker.md",
+      "schema": 1
+    }
+  ]
+}

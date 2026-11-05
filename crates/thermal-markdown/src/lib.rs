@@ -10,7 +10,13 @@
 //!
 //! Supported: headings, paragraphs, **bold**, *italic*, `code`, ~~strike~~, links
 //! (underlined), block quotes, fenced code, ordered/unordered/task lists (nested),
-//! GFM tables, horizontal rules and images (dithered with [`Style::image`]).
+//! GFM tables, horizontal rules, images (dithered with [`Style::image`]) and QR codes:
+//!
+//! ````markdown
+//! ```qr
+//! https://example.com/menu
+//! ```
+//! ````
 //!
 //! Text can be English and Tamil, freely mixed. All fonts are embedded, so output is
 //! identical on every platform.

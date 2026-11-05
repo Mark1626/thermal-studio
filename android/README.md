@@ -12,9 +12,13 @@ android/app                                              Compose UI, Kotlin BLE 
 ```
 
 Features: Markdown editor with live preview (English and Tamil), photo dithering (all algorithms including
-Sketch, presets, tone controls, rotation), QR codes for links with an optional caption, "Share → Thermal Studio"
-for images, links and text, and BLE printing with progress, battery and status. Choose your printer once from a list
-of nearby devices; the app remembers it.
+Sketch, presets, tone controls, rotation), QR codes for links with an optional caption, templates (a Wi-Fi card,
+checklist, jar label and contact card, plus more from the official collection, a link or a file), "Share → Thermal Studio" for images,
+links and text, and BLE printing with progress, battery and status. Choose your printer once from a list of nearby
+devices; the app remembers it.
+
+The app only uses the internet when you open **Add a template** (to list the official collection) or add or
+refresh a template.
 
 ## Requirements
 

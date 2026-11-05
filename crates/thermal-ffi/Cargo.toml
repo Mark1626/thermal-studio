@@ -21,6 +21,7 @@ bindgen = ["uniffi/cli"]
 [dependencies]
 thermal-raster.workspace = true
 thermal-markdown.workspace = true
+thermal-templates.workspace = true
 thermal-proto.workspace = true
 uniffi.workspace = true
 thiserror.workspace = true

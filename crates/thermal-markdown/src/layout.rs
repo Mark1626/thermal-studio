@@ -8,7 +8,7 @@ use cosmic_text::{
     SwashCache, UnderlineStyle, Weight, Wrap,
 };
 use pulldown_cmark::Alignment;
-use thermal_raster::{Bitmap, Geometry, GrayF32, HAlign};
+use thermal_raster::{Bitmap, Geometry, GrayF32, HAlign, QrError, QrOptions};
 
 use crate::parse::{Block, Item, Span};
 use crate::{ImageResolver, Style};
@@ -152,6 +152,7 @@ impl Layout<'_> {
             }
             Block::Table { aligns, head, rows } => self.table(aligns, head, rows, x, y, width),
             Block::Image { url, alt } => self.image(url, alt, x, y, width),
+            Block::Qr(data) => self.qr(data, x, y, width),
         }
     }
 
@@ -475,6 +476,37 @@ impl Layout<'_> {
             self.rect(vx, y, 1, (cy - y) as u32);
         }
         cy
+    }
+
+    // --- QR codes -----------------------------------------------------------
+
+    /// A QR code as large as the column allows, centred. Short links get big, easy-to-scan
+    /// modules; long text still gets the smallest module phones read reliably.
+    fn qr(&mut self, data: &str, x: i32, y: i32, width: u32) -> i32 {
+        let opts = QrOptions {
+            max_width: width,
+            ..Default::default()
+        };
+        match thermal_raster::qr_code(&thermal_raster::normalize_url(data), &opts) {
+            Ok(code) => {
+                // A code with tiny modules may be wider than the column: centre it on the paper.
+                let cx = (x + (width as i32 - code.width() as i32) / 2).max(0);
+                self.canvas.ensure_height((y + code.height() as i32) as u32);
+                self.canvas.blit(&code, cx, y);
+                y + code.height() as i32
+            }
+            Err(e) => {
+                let span = Span {
+                    text: match e {
+                        QrError::Empty => "[empty QR code]".into(),
+                        QrError::TooLong => "[QR code: too much text to fit]".into(),
+                    },
+                    italic: true,
+                    ..Default::default()
+                };
+                y + self.text(&[span], x, y, width, self.body())
+            }
+        }
     }
 
     // --- images -------------------------------------------------------------

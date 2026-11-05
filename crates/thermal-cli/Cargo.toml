@@ -13,6 +13,8 @@ path = "src/main.rs"
 [dependencies]
 thermal-raster.workspace = true
 thermal-markdown.workspace = true
+thermal-templates.workspace = true
+jiff.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 thermal-proto.workspace = true

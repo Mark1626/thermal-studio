@@ -146,6 +146,19 @@ mod tests {
     }
 
     #[test]
+    fn qr_blocks_in_markdown_scan() {
+        let mut r = Renderer::new();
+        let md = "# Menu\n\n```qr\nexample.com/menu\n```\n\nScan for today's specials.";
+        let bmp = r.render(md, &Style::default(), &NoImages);
+        assert_eq!(decode(&bmp), "https://example.com/menu");
+
+        let too_long = format!("```qr\n{}\n```", "x".repeat(1500));
+        let bmp = r.render(&too_long, &Style::default(), &NoImages);
+        assert!(bmp.ink_dots() > 0, "an explanation prints instead");
+        assert!(bmp.height() < 100, "height {}", bmp.height());
+    }
+
+    #[test]
     fn errors_pass_through() {
         let mut r = Renderer::new();
         assert_eq!(r.render_qr(&label("   ", "x", true)), Err(QrError::Empty));

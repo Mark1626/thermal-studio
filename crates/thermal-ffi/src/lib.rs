@@ -1,9 +1,10 @@
 //! UniFFI bindings for the thermal-* libraries, shaped for mobile apps (Kotlin first).
 //!
 //! Everything here is a thin conversion layer; behaviour lives in `thermal-raster`,
-//! `thermal-markdown` and `thermal-proto`. Numbers crossing the boundary use signed
+//! `thermal-markdown`, `thermal-templates` and `thermal-proto`. Numbers crossing the boundary use signed
 //! types so Kotlin sees `Int`/`Long` rather than `UInt`/`ULong`.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use thermal_markdown::{FsImages, NoImages, Renderer, Style};
@@ -486,6 +487,263 @@ fn to_qr_label(s: QrSettings) -> thermal_markdown::QrLabel {
     }
 }
 
+// --- templates ----------------------------------------------------------------
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct TemplateChoice {
+    /// What the template sees.
+    pub value: String,
+    /// What the form shows.
+    pub label: String,
+}
+
+/// The kind of input a field needs. (Names avoid Kotlin's `List`.)
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum TemplateFieldKind {
+    /// One line of text.
+    Text,
+    /// Several lines of text.
+    Multiline,
+    /// One of `options`.
+    Choice { options: Vec<TemplateChoice> },
+    /// On or off.
+    Switch,
+    /// Any number of lines, one per entry.
+    Entries,
+    /// A day, written `2026-11-05`.
+    Date,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct TemplateField {
+    pub key: String,
+    pub label: String,
+    /// Longer explanation; may be empty.
+    pub help: String,
+    /// Example text for an empty input; may be empty.
+    pub placeholder: String,
+    pub required: bool,
+    pub kind: TemplateFieldKind,
+}
+
+/// A field's value: `Text` for text, multiline, choice and date fields (dates as
+/// `2026-11-05`, or empty), `Switch` and `Entries` for the others.
+#[derive(Clone, Debug, PartialEq, uniffi::Enum)]
+pub enum TemplateValue {
+    Text { value: String },
+    Switch { on: bool },
+    Entries { items: Vec<String> },
+}
+
+impl From<thermal_templates::Value> for TemplateValue {
+    fn from(v: thermal_templates::Value) -> Self {
+        match v {
+            thermal_templates::Value::Text(value) => TemplateValue::Text { value },
+            thermal_templates::Value::Bool(on) => TemplateValue::Switch { on },
+            thermal_templates::Value::List(items) => TemplateValue::Entries { items },
+        }
+    }
+}
+
+fn to_values(values: HashMap<String, TemplateValue>) -> thermal_templates::Values {
+    values
+        .into_iter()
+        .map(|(k, v)| {
+            let v = match v {
+                TemplateValue::Text { value } => thermal_templates::Value::Text(value),
+                TemplateValue::Switch { on } => thermal_templates::Value::Bool(on),
+                TemplateValue::Entries { items } => thermal_templates::Value::List(items),
+            };
+            (k, v)
+        })
+        .collect()
+}
+
+fn parse_today(today: &str) -> Result<thermal_templates::Date, ThermalError> {
+    thermal_templates::Date::parse(today).ok_or_else(|| {
+        ThermalError::InvalidArgument(format!("`{today}` is not a date like 2026-11-05"))
+    })
+}
+
+fn template_error(e: thermal_templates::Error) -> ThermalError {
+    ThermalError::InvalidArgument(e.to_string())
+}
+
+/// A fill-in-the-blanks note (see `thermal-templates` for the file format).
+#[derive(uniffi::Object)]
+pub struct NoteTemplate {
+    inner: thermal_templates::Template,
+}
+
+#[uniffi::export]
+impl NoteTemplate {
+    /// Read a template file. The error message explains what's wrong, for showing to
+    /// the person who added it.
+    #[uniffi::constructor]
+    pub fn parse(source: String) -> Result<Arc<Self>, ThermalError> {
+        let inner = thermal_templates::Template::parse(&source).map_err(template_error)?;
+        Ok(Arc::new(Self { inner }))
+    }
+
+    pub fn id(&self) -> String {
+        self.inner.id.clone()
+    }
+
+    pub fn name(&self) -> String {
+        self.inner.name.clone()
+    }
+
+    pub fn description(&self) -> String {
+        self.inner.description.clone()
+    }
+
+    pub fn version(&self) -> String {
+        self.inner.version.clone()
+    }
+
+    pub fn author(&self) -> String {
+        self.inner.author.clone()
+    }
+
+    pub fn fields(&self) -> Vec<TemplateField> {
+        use thermal_templates::FieldKind as K;
+        self.inner
+            .fields
+            .iter()
+            .map(|f| TemplateField {
+                key: f.key.clone(),
+                label: f.label.clone(),
+                help: f.help.clone(),
+                placeholder: f.placeholder.clone(),
+                required: f.required,
+                kind: match &f.kind {
+                    K::Text { .. } => TemplateFieldKind::Text,
+                    K::Multiline { .. } => TemplateFieldKind::Multiline,
+                    K::Choice { options, .. } => TemplateFieldKind::Choice {
+                        options: options
+                            .iter()
+                            .map(|o| TemplateChoice {
+                                value: o.value.clone(),
+                                label: o.label.clone(),
+                            })
+                            .collect(),
+                    },
+                    K::Bool { .. } => TemplateFieldKind::Switch,
+                    K::List { .. } => TemplateFieldKind::Entries,
+                    K::Date { .. } => TemplateFieldKind::Date,
+                },
+            })
+            .collect()
+    }
+
+    /// Every field's starting value. `today` is the local date, as `2026-11-05`.
+    pub fn defaults(&self, today: String) -> Result<HashMap<String, TemplateValue>, ThermalError> {
+        let today = parse_today(&today)?;
+        Ok(self
+            .inner
+            .defaults(today)
+            .into_iter()
+            .map(|(k, v)| (k, v.into()))
+            .collect())
+    }
+
+    /// Labels of required fields that are still empty.
+    pub fn missing(
+        &self,
+        values: HashMap<String, TemplateValue>,
+        today: String,
+    ) -> Result<Vec<String>, ThermalError> {
+        let today = parse_today(&today)?;
+        Ok(self
+            .inner
+            .missing(&to_values(values), today)
+            .iter()
+            .map(|f| f.label.clone())
+            .collect())
+    }
+
+    /// The filled-in note as Markdown, for [`MarkdownRenderer::render`].
+    pub fn fill(
+        &self,
+        values: HashMap<String, TemplateValue>,
+        today: String,
+    ) -> Result<String, ThermalError> {
+        let today = parse_today(&today)?;
+        self.inner
+            .fill(&to_values(values), today)
+            .map_err(template_error)
+    }
+}
+
+/// The templates that ship with the app.
+#[uniffi::export]
+pub fn builtin_templates() -> Vec<Arc<NoteTemplate>> {
+    thermal_templates::builtin()
+        .into_iter()
+        .map(|inner| Arc::new(NoteTemplate { inner }))
+        .collect()
+}
+
+/// Check a link typed to add a template (https only; GitHub file pages become the raw
+/// file). The error message is written for the person who typed it.
+#[uniffi::export]
+pub fn template_link(input: String) -> Result<String, ThermalError> {
+    thermal_templates::template_link(&input).map_err(ThermalError::InvalidArgument)
+}
+
+/// Largest template file accepted, in bytes.
+#[uniffi::export]
+pub fn max_template_bytes() -> i32 {
+    thermal_templates::MAX_TEMPLATE_BYTES as i32
+}
+
+/// A template the official list offers.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CatalogEntry {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    pub author: String,
+    /// Link to the template file.
+    pub url: String,
+}
+
+/// Where the official list of templates (`index.json`) is.
+#[uniffi::export]
+pub fn official_index_url() -> String {
+    thermal_templates::OFFICIAL_INDEX.into()
+}
+
+/// Largest list of templates accepted, in bytes.
+#[uniffi::export]
+pub fn max_index_bytes() -> i32 {
+    thermal_templates::MAX_INDEX_BYTES as i32
+}
+
+/// Read an `index.json` downloaded from `index_url`: the templates it offers that this
+/// version can use, with links to their files.
+#[uniffi::export]
+pub fn parse_template_index(
+    json: String,
+    index_url: String,
+) -> Result<Vec<CatalogEntry>, ThermalError> {
+    use thermal_templates::Index;
+    let index = Index::parse(&json).map_err(template_error)?;
+    Ok(index
+        .templates
+        .into_iter()
+        .map(|e| CatalogEntry {
+            url: Index::file_url(&index_url, &e),
+            id: e.id,
+            name: e.name,
+            description: e.description,
+            version: e.version,
+            author: e.author,
+        })
+        .collect())
+}
+
 // --- printer protocol ---------------------------------------------------------
 
 /// BLE layout as full 128-bit UUID strings, plus the advertised-name fragment.
@@ -771,6 +1029,76 @@ mod tests {
         assert!(matches!(s.poll(0), SessionAction::DrainReplies));
         assert!(matches!(s.poll(0), SessionAction::Write { .. }));
         assert_eq!(gatt_info().write, "0000ff02-0000-1000-8000-00805f9b34fb");
+    }
+
+    #[test]
+    fn templates_fill_and_render() {
+        let all = builtin_templates();
+        let wifi = all.iter().find(|t| t.id() == "wifi-card").unwrap();
+        let today = "2026-11-05".to_string();
+        let mut values = wifi.defaults(today.clone()).unwrap();
+        assert_eq!(
+            wifi.missing(values.clone(), today.clone()).unwrap(),
+            ["Network name"]
+        );
+        values.insert(
+            "ssid".into(),
+            TemplateValue::Text {
+                value: "Home".into(),
+            },
+        );
+        values.insert("hidden".into(), TemplateValue::Switch { on: true });
+        assert!(
+            wifi.missing(values.clone(), today.clone())
+                .unwrap()
+                .is_empty()
+        );
+        let markdown = wifi.fill(values, today.clone()).unwrap();
+        assert!(markdown.contains("S:Home;"), "{markdown}");
+        let raster = MarkdownRenderer::new()
+            .render(markdown, default_markdown_settings(), None)
+            .unwrap();
+        assert_eq!(raster.width, 384);
+
+        let jar = all.iter().find(|t| t.id() == "jar-label").unwrap();
+        assert!(matches!(jar.fields()[1].kind, TemplateFieldKind::Date));
+        assert_eq!(
+            jar.defaults(today.clone()).unwrap()["made"],
+            TemplateValue::Text {
+                value: today.clone()
+            }
+        );
+        let checklist = all.iter().find(|t| t.id() == "checklist").unwrap();
+        assert!(matches!(
+            checklist.defaults(today.clone()).unwrap()["items"],
+            TemplateValue::Entries { .. }
+        ));
+        assert!(wifi.fill(HashMap::new(), "05/11/2026".into()).is_err());
+    }
+
+    #[test]
+    fn template_errors_explain_themselves() {
+        let e = NoteTemplate::parse("# not a template".into())
+            .err()
+            .unwrap();
+        assert!(e.to_string().contains("`---` block"), "{e}");
+        let e = template_link("http://example.com/t.md".into()).unwrap_err();
+        assert!(e.to_string().contains("https://"), "{e}");
+        assert_eq!(max_template_bytes(), 256 * 1024);
+    }
+
+    #[test]
+    fn template_index_resolves_links() {
+        let json = include_str!("../../../templates/index.json");
+        let entries = parse_template_index(json.into(), official_index_url()).unwrap();
+        let tracker = entries.iter().find(|e| e.id == "calendar-tracker").unwrap();
+        assert_eq!(
+            tracker.url,
+            "https://raw.githubusercontent.com/Mark1626/thermal-studio/master/templates/calendar-tracker.md"
+        );
+        assert!(!tracker.version.is_empty());
+        assert!(parse_template_index("nope".into(), official_index_url()).is_err());
+        assert_eq!(max_index_bytes(), 1024 * 1024);
     }
 
     #[test]

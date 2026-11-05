@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use thermal_markdown::{FsImages, Renderer, Style};
+use thermal_markdown::{FsImages, ImageResolver, NoImages, Renderer, Style};
 use thermal_raster::{Algorithm, Bitmap, ImageOptions, Rotation, paper};
+use thermal_templates::{Date, FieldKind, Index, Template, Value, Values};
 
 /// Prepare images and Markdown for 384-dot thermal printers.
 #[derive(Parser)]
@@ -20,6 +21,18 @@ enum Cmd {
     Image(ImageArgs),
     /// Render a Markdown file (or `-` for stdin) to a 1-bit bitmap.
     Markdown(MarkdownArgs),
+    /// Fill in a template and render it.
+    Template(TemplateArgs),
+    /// List the built-in templates and their fields.
+    Templates,
+    /// Write `index.json` for a folder of templates (the list the apps offer to add).
+    IndexTemplates {
+        /// Folder holding the templates, such as `templates`.
+        dir: PathBuf,
+        /// Only check that `index.json` is up to date.
+        #[arg(long)]
+        check: bool,
+    },
     /// List dithering algorithms.
     Algorithms,
     /// List nearby printers (Bluetooth LE).
@@ -155,6 +168,20 @@ struct MarkdownArgs {
     image_algo: Option<Algorithm>,
 }
 
+#[derive(Args)]
+struct TemplateArgs {
+    /// A built-in template (see `thermal templates`) or a template file (`.md`).
+    template: String,
+    /// Fill in a field. Repeat a list field to add entries; switches take true or false.
+    #[arg(short, long = "set", value_name = "KEY=VALUE")]
+    set: Vec<String>,
+    /// Write the filled-in Markdown to stdout instead of rendering it.
+    #[arg(long)]
+    markdown: bool,
+    #[command(flatten)]
+    out: Output,
+}
+
 fn parse_algorithm(s: &str) -> Result<Algorithm, String> {
     Algorithm::from_id(s).ok_or_else(|| {
         let ids: Vec<_> = Algorithm::ALL.iter().map(|a| a.id()).collect();
@@ -188,6 +215,41 @@ fn main() -> Result<()> {
         }
         Cmd::Image(args) => image_cmd(args),
         Cmd::Markdown(args) => markdown_cmd(args),
+        Cmd::Template(args) => template_cmd(args),
+        Cmd::Templates => {
+            for (i, t) in thermal_templates::builtin().iter().enumerate() {
+                if i > 0 {
+                    println!();
+                }
+                describe_template(t);
+            }
+            println!("\nFill one in: thermal template <name> --set key=value -o note.png");
+            Ok(())
+        }
+        Cmd::IndexTemplates { dir, check } => {
+            let index = Index::from_dir(&dir).map_err(anyhow::Error::msg)?;
+            let path = dir.join("index.json");
+            let json = index.to_json();
+            if check {
+                if std::fs::read_to_string(&path).ok().as_deref() != Some(json.as_str()) {
+                    bail!(
+                        "{} is out of date; run `thermal index-templates {}`",
+                        path.display(),
+                        dir.display()
+                    );
+                }
+                eprintln!("{} is up to date", path.display());
+            } else {
+                std::fs::write(&path, json)
+                    .with_context(|| format!("writing {}", path.display()))?;
+                eprintln!(
+                    "wrote {} ({} templates)",
+                    path.display(),
+                    index.templates.len()
+                );
+            }
+            Ok(())
+        }
     }
 }
 
@@ -301,6 +363,117 @@ fn markdown_cmd(a: MarkdownArgs) -> Result<()> {
     let mut r = Renderer::new();
     let bmp = r.render(&text, &style, &FsImages::new(base));
     finish(&bmp, &a.out)
+}
+
+fn template_cmd(a: TemplateArgs) -> Result<()> {
+    // A path, or the id of a built-in template.
+    let looks_like_path = a.template.ends_with(".md") || a.template.contains(['/', '\\']);
+    let (t, images): (Template, Box<dyn ImageResolver>) = if looks_like_path {
+        let path = Path::new(&a.template);
+        let src =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let t = Template::parse(&src).with_context(|| format!("in {}", path.display()))?;
+        let base = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        (t, Box::new(FsImages::new(base)))
+    } else {
+        let all = thermal_templates::builtin();
+        let ids: Vec<_> = all.iter().map(|t| t.id.clone()).collect();
+        let t = all
+            .into_iter()
+            .find(|t| t.id == a.template)
+            .with_context(|| {
+                format!(
+                    "no built-in template called `{}` (there are: {}); to use a file, give its path",
+                    a.template,
+                    ids.join(", ")
+                )
+            })?;
+        (t, Box::new(NoImages))
+    };
+
+    let mut values = Values::new();
+    for kv in &a.set {
+        let (key, v) = kv
+            .split_once('=')
+            .with_context(|| format!("`--set {kv}`: expected KEY=VALUE"))?;
+        let Some(field) = t.field(key) else {
+            let keys: Vec<_> = t.fields.iter().map(|f| f.key.as_str()).collect();
+            bail!(
+                "`{}` has no field called `{key}`; its fields are: {}",
+                t.id,
+                keys.join(", ")
+            );
+        };
+        let value = match &field.kind {
+            FieldKind::Bool { .. } => Value::Bool(match v.to_ascii_lowercase().as_str() {
+                "true" | "yes" | "on" | "1" => true,
+                "false" | "no" | "off" | "0" => false,
+                _ => bail!("`--set {kv}`: `{key}` is a switch; use true or false"),
+            }),
+            // The first --set replaces the default entries; later ones add to them.
+            FieldKind::List { .. } => match values.remove(key) {
+                Some(Value::List(mut items)) => {
+                    items.push(v.into());
+                    Value::List(items)
+                }
+                _ => Value::List(vec![v.into()]),
+            },
+            FieldKind::Date { .. } if v.eq_ignore_ascii_case("today") => {
+                Value::Text(today().to_string())
+            }
+            _ => Value::Text(v.into()),
+        };
+        values.insert(key.into(), value);
+    }
+
+    let markdown = t.fill(&values, today())?;
+    if a.markdown {
+        print!("{markdown}");
+        return Ok(());
+    }
+    let missing: Vec<_> = t
+        .missing(&values, today())
+        .iter()
+        .map(|f| format!("--set {}=… ({})", f.key, f.label))
+        .collect();
+    if !missing.is_empty() {
+        bail!("fill in the required fields first: {}", missing.join(", "));
+    }
+    let bmp = Renderer::new().render(&markdown, &Style::default(), images.as_ref());
+    finish(&bmp, &a.out)
+}
+
+/// The local date.
+fn today() -> Date {
+    let d = jiff::Zoned::now().date();
+    Date::new(d.year().into(), d.month() as u32, d.day() as u32).unwrap_or(Date::MIN)
+}
+
+fn describe_template(t: &Template) {
+    println!("{}  {}", t.id, t.name);
+    if !t.description.is_empty() {
+        println!("  {}", t.description);
+    }
+    let width = t.fields.iter().map(|f| f.key.len()).max().unwrap_or(0);
+    for f in &t.fields {
+        let kind = match &f.kind {
+            FieldKind::Choice { options, .. } => {
+                let values: Vec<_> = options.iter().map(|o| o.value.as_str()).collect();
+                values.join(" | ")
+            }
+            FieldKind::Bool { .. } => "true | false".into(),
+            FieldKind::List { .. } => "list (repeat --set)".into(),
+            FieldKind::Date { .. } => "date: 2026-11-05 | today".into(),
+            _ => f.type_name().into(),
+        };
+        let required = if f.required { ", required" } else { "" };
+        println!(
+            "  {:<width$}  {:<26}  {}",
+            f.key,
+            format!("{kind}{required}"),
+            f.label
+        );
+    }
 }
 
 fn finish(bmp: &Bitmap, out: &Output) -> Result<()> {

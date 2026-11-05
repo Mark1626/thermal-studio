@@ -9,6 +9,8 @@ license.workspace = true
 [dependencies]
 thermal-raster.workspace = true
 thermal-markdown.workspace = true
+thermal-templates.workspace = true
+jiff.workspace = true
 eframe = { workspace = true, features = ["persistence"] }
 egui.workspace = true
 rfd.workspace = true
@@ -16,3 +18,5 @@ image.workspace = true
 thermal-proto.workspace = true
 thermal-ble.workspace = true
 tokio.workspace = true
+ureq.workspace = true
+serde.workspace = true

@@ -6,9 +6,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 mod printer;
+mod templates;
 
 use eframe::egui::{self, Color32, ColorImage, RichText, TextureHandle, TextureOptions};
 use printer::{Command, Event, PrinterWorker};
+use templates::TemplatesTab;
 use thermal_ble::PrinterInfo;
 use thermal_markdown::{FsImages, QrLabel, Renderer, Style};
 use thermal_proto::{Density, PrintJob};
@@ -28,8 +30,8 @@ const LONG_PRINT_MM: f32 = 200.0;
 /// Window, taskbar and Dock icon: the Android launcher icon (see `assets/icon.svg`).
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
-/// Usage: `thermal-studio [FILE | URL]` opens an image or Markdown file, or makes a QR
-/// code for an `http(s)://` link.
+/// Usage: `thermal-studio [FILE | URL]` opens an image, Markdown or template file, or makes
+/// a QR code for an `http(s)://` link.
 /// `--screenshot OUT.png` (development aid) saves one rendered frame and quits.
 fn main() -> eframe::Result {
     let mut args = std::env::args_os().skip(1);
@@ -64,6 +66,7 @@ fn main() -> eframe::Result {
                 .storage
                 .and_then(|s| s.get_string(PRINTER_KEY))
                 .filter(|n| !n.is_empty());
+            studio.templates.load(cc.storage);
             if let Some(path) = open {
                 studio.open_any(path);
             }
@@ -77,6 +80,7 @@ enum Tab {
     Image,
     Markdown,
     Qr,
+    Templates,
 }
 
 /// A rendered bitmap plus its on-screen texture.
@@ -322,6 +326,7 @@ struct Studio {
     image: ImageTab,
     markdown: MarkdownTab,
     qr: QrTab,
+    templates: TemplatesTab,
     printer: PrinterPanel,
     message: Option<String>,
     notice: Option<String>,
@@ -337,6 +342,7 @@ impl Default for Studio {
             image: ImageTab::default(),
             markdown: MarkdownTab::default(),
             qr: QrTab::default(),
+            templates: TemplatesTab::default(),
             printer: PrinterPanel::default(),
             message: None,
             notice: None,
@@ -347,8 +353,17 @@ impl Default for Studio {
 }
 
 impl eframe::App for Studio {
+    fn persist_egui_memory(&self) -> bool {
+        self.screenshot.is_none()
+    }
+
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        // Screenshot runs leave the saved state alone.
+        if self.screenshot.is_some() {
+            return;
+        }
         storage.set_string(PRINTER_KEY, self.printer.chosen.clone().unwrap_or_default());
+        self.templates.save(storage);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -359,6 +374,7 @@ impl eframe::App for Studio {
         self.update_image(&ctx);
         self.update_markdown(&ctx);
         self.update_qr(&ctx);
+        self.update_template(&ctx);
 
         self.picker_window(&ctx);
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
@@ -420,6 +436,21 @@ impl eframe::App for Studio {
                     self.qr.preview.show(ui, self.zoom, hint)
                 });
             }
+            Tab::Templates => {
+                egui::Panel::left("templates-panel")
+                    .resizable(true)
+                    .default_size(340.0)
+                    .size_range(260.0..=640.0)
+                    .show(ui, |ui| self.template_controls(ui));
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let hint = self
+                        .templates
+                        .error
+                        .as_deref()
+                        .unwrap_or("Choose a template");
+                    self.templates.preview.show(ui, self.zoom, hint)
+                });
+            }
         }
     }
 }
@@ -436,6 +467,11 @@ impl Studio {
             );
             ui.selectable_value(&mut self.tab, Tab::Image, RichText::new("Image").size(15.0));
             ui.selectable_value(&mut self.tab, Tab::Qr, RichText::new("QR code").size(15.0));
+            ui.selectable_value(
+                &mut self.tab,
+                Tab::Templates,
+                RichText::new("Templates").size(15.0),
+            );
             ui.separator();
             ui.label("Zoom");
             for z in [1.0, 1.5, 2.0, 3.0] {
@@ -473,6 +509,7 @@ impl Studio {
             Tab::Image => &self.image.preview,
             Tab::Markdown => &self.markdown.preview,
             Tab::Qr => &self.qr.preview,
+            Tab::Templates => &self.templates.preview,
         }
     }
 
@@ -498,8 +535,14 @@ impl Studio {
                 self.printer.confirm = None;
             }
         } else {
-            let enabled = length_mm.is_some() && !self.printer.busy();
+            // A template isn't ready until its required fields are filled in.
+            let missing = match self.tab {
+                Tab::Templates => self.templates.missing(),
+                _ => Vec::new(),
+            };
+            let enabled = length_mm.is_some() && !self.printer.busy() && missing.is_empty();
             let hover = match length_mm {
+                _ if !missing.is_empty() => format!("Fill in {} first", missing.join(", ")),
                 Some(mm) => format!("Send this preview to the printer (≈{mm:.0} mm of paper)"),
                 None => "Nothing to print yet".into(),
             };
@@ -732,8 +775,17 @@ impl Studio {
         if let Some(url) = path.to_str().filter(|s| is_web_link(s)) {
             self.open_link(url.to_string());
         } else if has_ext(&path, &MARKDOWN_EXTS) {
-            self.open_markdown(path);
-            self.tab = Tab::Markdown;
+            // A template file joins the Templates tab; anything else opens as a note.
+            match self.templates.add_file(&path) {
+                Ok(name) => {
+                    self.notice = Some(format!("Added the template “{name}”"));
+                    self.tab = Tab::Templates;
+                }
+                Err(_) => {
+                    self.open_markdown(path);
+                    self.tab = Tab::Markdown;
+                }
+            }
         } else {
             self.open_image(path);
             self.tab = Tab::Image;
@@ -1039,7 +1091,11 @@ impl Studio {
                 .as_ref()
                 .and_then(|p| p.file_name())
                 .map(|n| n.to_string_lossy().into_owned());
-            ui.label(RichText::new(name.unwrap_or_else(|| "sample.md (unsaved)".into())).weak());
+            let name = name.unwrap_or_else(|| match tab.text == SAMPLE_MD {
+                true => "sample.md (unsaved)".into(),
+                false => "Not saved yet".into(),
+            });
+            ui.label(RichText::new(name).weak());
         });
 
         let tab = &mut self.markdown;
